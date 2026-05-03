@@ -10,7 +10,7 @@ Uses time as a weapon. Deploy **Echos** of your past movement to manipulate AI, 
 ## 🎮 Play Online (GitHub Pages)
 
 **Live Demo**  
-`https://johan621.github.io/Chronosynth/`
+https://johan621.github.io/Chronosynth/
 
 
 ---
