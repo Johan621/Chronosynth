@@ -1,0 +1,989 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Chronosynth</title>
+    <style>
+        /* CSS Reset & Setup */
+        * { box-sizing: border-box; margin: 0; padding: 0; user-select: none; }
+        body, html { width: 100%; height: 100%; background-color: #030508; overflow: hidden; font-family: 'Segoe UI', system-ui, sans-serif; }
+        
+        /* Canvas */
+        #gameCanvas { display: block; width: 100%; height: 100%; touch-action: none; z-index: 1; }
+        
+        /* UI Overlays */
+        #ui-layer { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 10; display: flex; flex-direction: column; justify-content: space-between; padding: 20px; }
+        .hidden { display: none !important; }
+        
+        /* HUD */
+        #hud { display: flex; justify-content: space-between; width: 100%; pointer-events: none; transition: opacity 0.3s; opacity: 0; }
+        .hud-panel { background: rgba(10, 15, 25, 0.6); border: 1px solid rgba(0, 255, 255, 0.3); border-radius: 8px; padding: 15px 20px; backdrop-filter: blur(5px); box-shadow: 0 0 15px rgba(0, 255, 255, 0.1); color: #fff; text-transform: uppercase; letter-spacing: 2px; font-weight: bold; font-size: 14px; }
+        
+        #progress-container { width: 200px; height: 10px; background: rgba(255,255,255,0.1); border-radius: 5px; margin-top: 8px; overflow: hidden; position: relative; }
+        #progress-bar { height: 100%; width: 0%; background: linear-gradient(90deg, #0ff, #f0f); transition: width 0.2s ease-out; box-shadow: 0 0 10px #0ff; }
+        
+        #phase-indicator { text-align: right; }
+        #phase-text { font-size: 18px; text-shadow: 0 0 10px currentColor; transition: color 0.3s; }
+        .phase-gather { color: #0ff; }
+        .phase-hunt { color: #f0f; }
+
+        #lives-container { display: flex; gap: 5px; margin-top: 8px; justify-content: flex-end; }
+        .life { width: 12px; height: 12px; background: #f05; border-radius: 50%; box-shadow: 0 0 10px #f05; transition: transform 0.2s, opacity 0.2s; }
+        .life.lost { opacity: 0.2; transform: scale(0.5); box-shadow: none; }
+
+        /* Screens */
+        .screen { position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: radial-gradient(circle at center, rgba(10,15,30,0.9) 0%, rgba(2,3,5,0.95) 100%); display: flex; flex-direction: column; align-items: center; justify-content: center; z-index: 20; color: white; pointer-events: auto; backdrop-filter: blur(10px); padding: 20px; box-sizing: border-box; overflow-y: auto; }
+        
+        h1 { font-size: 4rem; margin-bottom: 10px; background: linear-gradient(45deg, #0ff, #f0f); -webkit-background-clip: text; -webkit-text-fill-color: transparent; filter: drop-shadow(0 0 15px rgba(0,255,255,0.5)); letter-spacing: 5px; text-transform: uppercase; flex-shrink: 0; }
+        
+        .instructions { max-width: 600px; max-height: 45vh; overflow-y: auto; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); padding: 30px; border-radius: 12px; margin-bottom: 30px; line-height: 1.6; font-size: 1rem; color: #b0c4de; }
+        .instructions h3 { color: #fff; margin-bottom: 15px; border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 5px; }
+        .instructions ul { margin-left: 20px; margin-bottom: 15px; }
+        .instructions li { margin-bottom: 8px; }
+        .highlight { color: #0ff; font-weight: bold; }
+        .highlight-alt { color: #f0f; font-weight: bold; }
+        
+        button { background: transparent; border: 2px solid #0ff; color: #0ff; padding: 15px 40px; font-size: 1.2rem; text-transform: uppercase; letter-spacing: 2px; cursor: pointer; border-radius: 30px; transition: all 0.3s ease; box-shadow: 0 0 15px rgba(0,255,255,0.2), inset 0 0 10px rgba(0,255,255,0.1); outline: none; font-weight: bold; }
+        button:hover { background: rgba(0, 255, 255, 0.2); box-shadow: 0 0 30px rgba(0,255,255,0.6), inset 0 0 15px rgba(0,255,255,0.4); text-shadow: 0 0 5px #fff; transform: scale(1.05); }
+        button:active { transform: scale(0.95); }
+
+        /* Mobile Controls */
+        #mobile-controls { position: absolute; bottom: 30px; left: 0; width: 100%; display: flex; justify-content: center; pointer-events: none; opacity: 0; transition: opacity 0.3s; z-index: 10; }
+        #echo-btn { pointer-events: auto; background: rgba(0, 255, 255, 0.1); border-color: rgba(0, 255, 255, 0.5); padding: 15px 30px; font-size: 1rem; box-shadow: 0 0 20px rgba(0,255,255,0.2); backdrop-filter: blur(4px); }
+        
+        /* Stats */
+        .stats-row { display: flex; justify-content: space-between; width: 100%; margin-bottom: 10px; border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 5px; }
+        
+        @media (max-width: 768px) {
+            h1 { font-size: 2.5rem; }
+            .instructions { padding: 15px; font-size: 0.9rem; }
+            .hud-panel { padding: 10px; }
+            #progress-container { width: 120px; }
+        }
+    </style>
+</head>
+<body>
+
+    <!-- Game Canvas -->
+    <canvas id="gameCanvas"></canvas>
+
+    <!-- UI Layer -->
+    <div id="ui-layer">
+        <!-- HUD -->
+        <div id="hud">
+            <div class="hud-panel">
+                <div>Resonance</div>
+                <div id="progress-container"><div id="progress-bar"></div></div>
+            </div>
+            <div class="hud-panel" id="phase-indicator">
+                <div>Phase</div>
+                <div id="phase-text" class="phase-gather">Gather</div>
+                <div id="lives-container">
+                    <div class="life" id="life-1"></div>
+                    <div class="life" id="life-2"></div>
+                    <div class="life" id="life-3"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Mobile Controls -->
+        <div id="mobile-controls">
+            <button id="echo-btn">Deploy Echo</button>
+        </div>
+    </div>
+
+    <!-- Start Screen -->
+    <div id="start-screen" class="screen">
+        <h1>Chronosynth</h1>
+        <div class="instructions">
+            <h3>Mission Directive</h3>
+            <p>Stabilize the reactor by collecting Energy Cores (yellow) until Resonance reaches 100%.</p>
+            <br>
+            <h3>Mechanics</h3>
+            <ul>
+                <li><span class="highlight">Time Cloning:</span> Press <b>SPACEBAR</b> (or Echo button) to deploy an Echo of your past 3 seconds. It loops infinitely.</li>
+                <li><span class="highlight">Adaptive Nodes:</span> Cores flee from YOU, but are attracted to your ECHOS. Herd them using your past selves.</li>
+                <li><span class="highlight-alt">Phase Shifts:</span> Every 15s, the rules change:
+                    <br> - <b style="color:#0ff">GATHER Phase:</b> Herd cores into the central Nexus.
+                    <br> - <b style="color:#f0f">HUNT Phase:</b> Nexus repels cores. You must touch cores directly.
+                </li>
+                <li><span class="highlight-alt">Learning AI:</span> Red Hunters predict your future position based on velocity. Confuse their algorithm by deploying an Echo before sharply changing direction.</li>
+            </ul>
+        </div>
+        <button id="start-btn">Initialize</button>
+    </div>
+
+    <!-- Game Over Screen -->
+    <div id="game-over-screen" class="screen hidden">
+        <h1 style="color: #f05; -webkit-text-fill-color: #f05; text-shadow: 0 0 20px #f05; filter: none;">Critical Failure</h1>
+        <div class="instructions" style="text-align: center;">
+            <h3>Reactor Destabilized</h3>
+            <div class="stats-row"><span>Resonance Achieved:</span> <span id="final-score" class="highlight">0%</span></div>
+            <div class="stats-row"><span>Survival Time:</span> <span id="final-time" class="highlight">0s</span></div>
+            <p style="margin-top: 20px; font-style: italic; color: #888;">Hint: Use Echos as decoys when Hunters lock onto your trajectory.</p>
+        </div>
+        <button id="restart-btn" style="border-color: #f05; color: #f05; box-shadow: 0 0 15px rgba(255,0,85,0.2);">Reboot System</button>
+    </div>
+
+    <!-- Victory Screen -->
+    <div id="victory-screen" class="screen hidden">
+        <h1 style="color: #0f0; -webkit-text-fill-color: #0f0; text-shadow: 0 0 20px #0f0; filter: none;">Synthesis Complete</h1>
+        <div class="instructions" style="text-align: center;">
+            <h3>Reactor Stabilized</h3>
+            <div class="stats-row"><span>Completion Time:</span> <span id="win-time" class="highlight">0s</span></div>
+            <div class="stats-row"><span>Echos Deployed:</span> <span id="win-echos" class="highlight">0</span></div>
+            <p style="margin-top: 20px; color: #0f0;">Excellent spatial-temporal manipulation, Operator.</p>
+        </div>
+        <button id="play-again-btn" style="border-color: #0f0; color: #0f0; box-shadow: 0 0 15px rgba(0,255,0,0.2);">Initialize Next Cycle</button>
+    </div>
+
+<script>
+/**
+ * CHRONOSYNTH - Core Game Engine
+ * Pure Vanilla JS, No external libraries.
+ * Architecture: ES6 Classes with strict separation of concerns.
+ */
+
+// --- UTILITIES & MATH ---
+const MathUtils = {
+    distance: (p1, p2) => Math.hypot(p2.x - p1.x, p2.y - p1.y),
+    lerp: (start, end, amt) => (1 - amt) * start + amt * end,
+    clamp: (val, min, max) => Math.max(min, Math.min(max, val)),
+    randomRange: (min, max) => Math.random() * (max - min) + min,
+    normalize: (v) => {
+        const mag = Math.hypot(v.x, v.y);
+        return mag === 0 ? {x: 0, y: 0} : {x: v.x / mag, y: v.y / mag};
+    }
+};
+
+// --- AUDIO SYNTHESIS ENGINE ---
+// Procedurally generated sounds using Web Audio API
+class AudioEngine {
+    constructor() {
+        this.ctx = new (window.AudioContext || window.webkitAudioContext)();
+        this.enabled = false;
+    }
+
+    init() {
+        if (this.ctx.state === 'suspended') this.ctx.resume();
+        this.enabled = true;
+    }
+
+    playTone(freq, type, duration, vol = 0.1, slideFreq = null) {
+        if (!this.enabled) return;
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+        
+        osc.type = type;
+        osc.frequency.setValueAtTime(freq, this.ctx.currentTime);
+        if (slideFreq) {
+            osc.frequency.exponentialRampToValueAtTime(slideFreq, this.ctx.currentTime + duration);
+        }
+
+        gain.gain.setValueAtTime(vol, this.ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + duration);
+
+        osc.connect(gain);
+        gain.connect(this.ctx.destination);
+        osc.start();
+        osc.stop(this.ctx.currentTime + duration);
+    }
+
+    sfxCollect() { this.playTone(880, 'sine', 0.1, 0.2, 1760); }
+    sfxEcho() { this.playTone(220, 'triangle', 0.4, 0.2, 110); }
+    sfxPhaseGather() { this.playTone(440, 'sine', 0.8, 0.15, 880); }
+    sfxPhaseHunt() { this.playTone(440, 'sawtooth', 0.8, 0.1, 220); }
+    sfxDamage() { this.playTone(150, 'square', 0.3, 0.3, 50); }
+    sfxWin() {
+        this.playTone(440, 'sine', 0.2, 0.2, 554);
+        setTimeout(() => this.playTone(554, 'sine', 0.2, 0.2, 659), 100);
+        setTimeout(() => this.playTone(659, 'sine', 0.6, 0.2, 880), 200);
+    }
+}
+
+// --- GAME ENTITIES ---
+
+class Particle {
+    constructor(x, y, color, speed, life) {
+        this.x = x; this.y = y;
+        this.vx = (Math.random() - 0.5) * speed;
+        this.vy = (Math.random() - 0.5) * speed;
+        this.color = color;
+        this.life = life;
+        this.maxLife = life;
+        this.size = Math.random() * 3 + 1;
+    }
+    update(dt) {
+        this.x += this.vx * dt;
+        this.y += this.vy * dt;
+        this.life -= dt;
+        this.size *= 0.95;
+    }
+    draw(ctx) {
+        ctx.fillStyle = this.color;
+        ctx.globalAlpha = Math.max(0, this.life / this.maxLife);
+        ctx.beginPath();
+        ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.globalAlpha = 1;
+    }
+}
+
+class Player {
+    constructor(x, y) {
+        this.x = x; this.y = y;
+        this.targetX = x; this.targetY = y;
+        this.vx = 0; this.vy = 0;
+        this.radius = 12;
+        this.history = []; // Array of {x,y}
+        this.historyLength = 180; // ~3 seconds at 60fps
+        this.color = '#0ff';
+        this.invulnerable = 0;
+    }
+
+    update(dt, pointer) {
+        // Move towards pointer using lerp for smooth momentum
+        const prevX = this.x; const prevY = this.y;
+        this.x = MathUtils.lerp(this.x, pointer.x, 0.1 * (dt / 16));
+        this.y = MathUtils.lerp(this.y, pointer.y, 0.1 * (dt / 16));
+        
+        // Calculate velocity for AI prediction
+        this.vx = (this.x - prevX) / dt;
+        this.vy = (this.y - prevY) / dt;
+
+        // Record history for Echos
+        this.history.push({x: this.x, y: this.y});
+        if (this.history.length > this.historyLength) {
+            this.history.shift();
+        }
+
+        if (this.invulnerable > 0) this.invulnerable -= dt;
+    }
+
+    draw(ctx) {
+        // Trail
+        ctx.beginPath();
+        ctx.strokeStyle = `rgba(0, 255, 255, 0.2)`;
+        ctx.lineWidth = 4;
+        for (let i = Math.max(0, this.history.length - 20); i < this.history.length; i++) {
+            if (i === Math.max(0, this.history.length - 20)) ctx.moveTo(this.history[i].x, this.history[i].y);
+            else ctx.lineTo(this.history[i].x, this.history[i].y);
+        }
+        ctx.stroke();
+
+        // Body
+        ctx.shadowBlur = 15;
+        ctx.shadowColor = this.color;
+        ctx.fillStyle = (this.invulnerable > 0 && Math.floor(Date.now() / 100) % 2 === 0) ? '#fff' : this.color;
+        ctx.beginPath();
+        ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
+        ctx.fill();
+        
+        // Inner core
+        ctx.fillStyle = '#fff';
+        ctx.beginPath();
+        ctx.arc(this.x, this.y, this.radius * 0.4, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.shadowBlur = 0;
+    }
+}
+
+class Echo {
+    constructor(historyData) {
+        this.path = [...historyData];
+        this.index = 0;
+        this.radius = 10;
+        this.color = '#088';
+        this.life = 15000; // 15 seconds
+        this.maxLife = 15000;
+        this.x = this.path[0].x;
+        this.y = this.path[0].y;
+    }
+
+    update(dt) {
+        this.life -= dt;
+        // Loop through recorded path
+        this.index = (this.index + 1) % this.path.length;
+        this.x = this.path[this.index].x;
+        this.y = this.path[this.index].y;
+    }
+
+    draw(ctx) {
+        ctx.globalAlpha = Math.max(0, (this.life / this.maxLife) * 0.6);
+        ctx.strokeStyle = this.color;
+        ctx.lineWidth = 2;
+        ctx.setLineDash([5, 5]);
+        ctx.beginPath();
+        ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.globalAlpha = 1;
+    }
+}
+
+class Core {
+    constructor(x, y) {
+        this.x = x; this.y = y;
+        this.vx = 0; this.vy = 0;
+        this.radius = 6;
+        this.maxSpeed = 2;
+        this.color = '#ff0';
+        this.angle = Math.random() * Math.PI * 2;
+    }
+
+    update(dt, player, echos, nexus, phase, gameWidth, gameHeight) {
+        let ax = 0; let ay = 0;
+
+        // Flee from player
+        const distToPlayer = MathUtils.distance(this, player);
+        if (distToPlayer < 150) {
+            const force = (150 - distToPlayer) / 150;
+            ax -= ((player.x - this.x) / distToPlayer) * force * 0.5;
+            ay -= ((player.y - this.y) / distToPlayer) * force * 0.5;
+        }
+
+        // Seek Echos (Hidden strategy: use echos to trap cores)
+        for (let echo of echos) {
+            const dist = MathUtils.distance(this, echo);
+            if (dist < 200) {
+                const force = (200 - dist) / 200;
+                ax += ((echo.x - this.x) / dist) * force * 0.3;
+                ay += ((echo.y - this.y) / dist) * force * 0.3;
+            }
+        }
+
+        // Interact with Nexus based on phase
+        const distToNexus = MathUtils.distance(this, nexus);
+        if (phase === 'GATHER') {
+            if (distToNexus < 300) {
+                const force = (300 - distToNexus) / 300;
+                ax += ((nexus.x - this.x) / distToNexus) * force * 0.2;
+                ay += ((nexus.y - this.y) / distToNexus) * force * 0.2;
+            }
+        } else {
+            // HUNT phase: Nexus repels
+            if (distToNexus < 200) {
+                const force = (200 - distToNexus) / 200;
+                ax -= ((nexus.x - this.x) / distToNexus) * force * 0.4;
+                ay -= ((nexus.y - this.y) / distToNexus) * force * 0.4;
+            }
+        }
+
+        // Add some noise (Brownian motion)
+        this.angle += (Math.random() - 0.5) * 0.5;
+        ax += Math.cos(this.angle) * 0.05;
+        ay += Math.sin(this.angle) * 0.05;
+
+        // Apply physics
+        this.vx += ax * (dt / 16);
+        this.vy += ay * (dt / 16);
+
+        // Friction & Speed Limit
+        this.vx *= 0.95;
+        this.vy *= 0.95;
+        
+        const speed = Math.hypot(this.vx, this.vy);
+        if (speed > this.maxSpeed) {
+            this.vx = (this.vx / speed) * this.maxSpeed;
+            this.vy = (this.vy / speed) * this.maxSpeed;
+        }
+
+        this.x += this.vx * (dt/16);
+        this.y += this.vy * (dt/16);
+
+        // Bounds bounce
+        if (this.x < 10 || this.x > gameWidth - 10) this.vx *= -1;
+        if (this.y < 10 || this.y > gameHeight - 10) this.vy *= -1;
+        this.x = MathUtils.clamp(this.x, 10, gameWidth - 10);
+        this.y = MathUtils.clamp(this.y, 10, gameHeight - 10);
+    }
+
+    draw(ctx) {
+        ctx.shadowBlur = 10;
+        ctx.shadowColor = this.color;
+        ctx.fillStyle = this.color;
+        
+        ctx.save();
+        ctx.translate(this.x, this.y);
+        ctx.rotate(this.angle);
+        ctx.beginPath();
+        ctx.moveTo(0, -this.radius);
+        ctx.lineTo(this.radius, 0);
+        ctx.lineTo(0, this.radius);
+        ctx.lineTo(-this.radius, 0);
+        ctx.closePath();
+        ctx.fill();
+        ctx.restore();
+        ctx.shadowBlur = 0;
+    }
+}
+
+class Hunter {
+    constructor(x, y) {
+        this.x = x; this.y = y;
+        this.vx = 0; this.vy = 0;
+        this.radius = 12;
+        this.maxSpeed = 1.8;
+        this.color = '#f05';
+        this.angle = 0;
+        this.spawnTimer = 1000; // delay before active
+    }
+
+    update(dt, player, echos) {
+        if (this.spawnTimer > 0) {
+            this.spawnTimer -= dt;
+            return;
+        }
+
+        let targetX = player.x;
+        let targetY = player.y;
+
+        // AI PREDICTION: Calculate interception point based on player velocity
+        const distToPlayer = MathUtils.distance(this, player);
+        const lookAheadTime = distToPlayer / this.maxSpeed;
+        
+        let predictedX = player.x + (player.vx * lookAheadTime * 10);
+        let predictedY = player.y + (player.vy * lookAheadTime * 10);
+
+        // HIDDEN STRATEGY: Echos confuse the AI if they cross the prediction path
+        let confused = false;
+        for (let echo of echos) {
+            const distToEcho = MathUtils.distance(this, echo);
+            if (distToEcho < distToPlayer * 0.7) { // If echo is significantly closer
+                targetX = echo.x;
+                targetY = echo.y;
+                confused = true;
+                break;
+            }
+        }
+
+        if (!confused) {
+            targetX = predictedX;
+            targetY = predictedY;
+        }
+
+        // Steer towards target
+        const desiredX = targetX - this.x;
+        const desiredY = targetY - this.y;
+        const norm = MathUtils.normalize({x: desiredX, y: desiredY});
+        
+        const steerForce = 0.05;
+        this.vx += norm.x * steerForce * (dt/16);
+        this.vy += norm.y * steerForce * (dt/16);
+
+        // Speed limit
+        const speed = Math.hypot(this.vx, this.vy);
+        if (speed > this.maxSpeed) {
+            this.vx = (this.vx / speed) * this.maxSpeed;
+            this.vy = (this.vy / speed) * this.maxSpeed;
+        }
+
+        this.x += this.vx * (dt/16);
+        this.y += this.vy * (dt/16);
+        this.angle = Math.atan2(this.vy, this.vx);
+    }
+
+    draw(ctx) {
+        ctx.save();
+        ctx.translate(this.x, this.y);
+        ctx.rotate(this.angle);
+        
+        if (this.spawnTimer > 0) {
+            // Spawning animation
+            ctx.globalAlpha = 1 - (this.spawnTimer / 1000);
+            ctx.scale(2 - ctx.globalAlpha, 2 - ctx.globalAlpha);
+        }
+
+        ctx.shadowBlur = 15;
+        ctx.shadowColor = this.color;
+        ctx.strokeStyle = this.color;
+        ctx.fillStyle = 'rgba(255, 0, 85, 0.2)';
+        ctx.lineWidth = 2;
+
+        // Draw sharp triangle
+        ctx.beginPath();
+        ctx.moveTo(this.radius, 0);
+        ctx.lineTo(-this.radius, -this.radius * 0.7);
+        ctx.lineTo(-this.radius * 0.5, 0);
+        ctx.lineTo(-this.radius, this.radius * 0.7);
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
+        
+        ctx.restore();
+        ctx.shadowBlur = 0;
+        ctx.globalAlpha = 1;
+    }
+}
+
+class Nexus {
+    constructor(x, y) {
+        this.x = x; this.y = y;
+        this.radius = 40;
+        this.pulse = 0;
+    }
+
+    update(dt) {
+        this.pulse += dt * 0.005;
+    }
+
+    draw(ctx, phase) {
+        const color = phase === 'GATHER' ? '#0ff' : '#f0f';
+        const currentRadius = this.radius + Math.sin(this.pulse) * 5;
+
+        ctx.shadowBlur = 20;
+        ctx.shadowColor = color;
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 3;
+        
+        ctx.beginPath();
+        ctx.arc(this.x, this.y, currentRadius, 0, Math.PI * 2);
+        ctx.stroke();
+
+        ctx.globalAlpha = 0.1;
+        ctx.fillStyle = color;
+        ctx.fill();
+        
+        // Inner spinning rings
+        ctx.save();
+        ctx.translate(this.x, this.y);
+        ctx.rotate(this.pulse * 0.5);
+        ctx.setLineDash([15, 10]);
+        ctx.globalAlpha = 0.5;
+        ctx.beginPath();
+        ctx.arc(0, 0, currentRadius * 0.7, 0, Math.PI * 2);
+        ctx.stroke();
+        
+        ctx.rotate(-this.pulse);
+        ctx.beginPath();
+        ctx.arc(0, 0, currentRadius * 0.4, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.restore();
+        
+        ctx.setLineDash([]);
+        ctx.globalAlpha = 1;
+        ctx.shadowBlur = 0;
+    }
+}
+
+
+// --- MAIN GAME MANAGER ---
+
+class GameManager {
+    constructor() {
+        this.canvas = document.getElementById('gameCanvas');
+        this.ctx = this.canvas.getContext('2d', { alpha: false });
+        
+        // UI Elements
+        this.uiLayer = document.getElementById('ui-layer');
+        this.hud = document.getElementById('hud');
+        this.mobileControls = document.getElementById('mobile-controls');
+        this.startScreen = document.getElementById('start-screen');
+        this.gameOverScreen = document.getElementById('game-over-screen');
+        this.victoryScreen = document.getElementById('victory-screen');
+        this.progressBar = document.getElementById('progress-bar');
+        this.phaseText = document.getElementById('phase-text');
+        
+        this.audio = new AudioEngine();
+
+        // State variables
+        this.state = 'MENU'; // MENU, PLAYING, GAMEOVER, VICTORY
+        this.lastTime = 0;
+        this.width = 0;
+        this.height = 0;
+        this.pointer = { x: 0, y: 0 };
+        this.isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+
+        // Game Entities
+        this.player = null;
+        this.nexus = null;
+        this.echos = [];
+        this.cores = [];
+        this.hunters = [];
+        this.particles = [];
+
+        // Game Logic parameters
+        this.score = 0;
+        this.targetScore = 30; // Cores needed to win
+        this.lives = 3;
+        this.phase = 'GATHER'; // GATHER or HUNT
+        this.phaseTimer = 0;
+        this.phaseDuration = 15000; // 15 seconds
+        this.startTime = 0;
+        this.echosUsed = 0;
+        this.difficultyTimer = 0;
+        this.shakeTimer = 0;
+
+        this.init();
+    }
+
+    init() {
+        this.resize();
+        window.addEventListener('resize', () => this.resize());
+        
+        // Input handling
+        this.canvas.addEventListener('pointermove', (e) => this.updatePointer(e));
+        this.canvas.addEventListener('pointerdown', (e) => this.updatePointer(e));
+        
+        window.addEventListener('keydown', (e) => {
+            if (e.code === 'Space' && this.state === 'PLAYING') {
+                e.preventDefault();
+                this.deployEcho();
+            }
+        });
+
+        document.getElementById('echo-btn').addEventListener('click', (e) => {
+            e.preventDefault();
+            this.deployEcho();
+        });
+
+        document.getElementById('start-btn').addEventListener('click', () => this.startGame());
+        document.getElementById('restart-btn').addEventListener('click', () => this.startGame());
+        document.getElementById('play-again-btn').addEventListener('click', () => this.startGame());
+
+        if (this.isMobile) {
+            this.mobileControls.style.opacity = '1';
+        }
+
+        // Start background visual loop
+        requestAnimationFrame((t) => this.loop(t));
+    }
+
+    resize() {
+        this.width = window.innerWidth;
+        this.height = window.innerHeight;
+        this.canvas.width = this.width;
+        this.canvas.height = this.height;
+        // Keep pointer centered initially
+        if(this.state === 'MENU') {
+            this.pointer.x = this.width / 2;
+            this.pointer.y = this.height / 2;
+        }
+    }
+
+    updatePointer(e) {
+        if(this.state !== 'PLAYING') return;
+        this.pointer.x = e.clientX;
+        this.pointer.y = e.clientY;
+    }
+
+    startGame() {
+        this.audio.init();
+        this.state = 'PLAYING';
+        this.score = 0;
+        this.lives = 3;
+        this.phase = 'GATHER';
+        this.phaseTimer = this.phaseDuration;
+        this.startTime = Date.now();
+        this.echosUsed = 0;
+        this.difficultyTimer = 0;
+        
+        this.echos = [];
+        this.cores = [];
+        this.hunters = [];
+        this.particles = [];
+
+        this.player = new Player(this.width / 2, this.height * 0.8);
+        this.pointer.x = this.player.x;
+        this.pointer.y = this.player.y;
+        this.nexus = new Nexus(this.width / 2, this.height / 2);
+
+        // Initial spawn
+        for (let i = 0; i < 15; i++) this.spawnCore();
+
+        // UI Setup
+        this.startScreen.classList.add('hidden');
+        this.gameOverScreen.classList.add('hidden');
+        this.victoryScreen.classList.add('hidden');
+        this.hud.style.opacity = '1';
+        this.updateHUD();
+
+        this.lastTime = performance.now();
+    }
+
+    spawnCore() {
+        // Spawn at edges
+        let x, y;
+        if (Math.random() < 0.5) {
+            x = Math.random() < 0.5 ? -10 : this.width + 10;
+            y = Math.random() * this.height;
+        } else {
+            x = Math.random() * this.width;
+            y = Math.random() < 0.5 ? -10 : this.height + 10;
+        }
+        this.cores.push(new Core(x, y));
+    }
+
+    spawnHunter() {
+        // Spawn away from player
+        let x, y, dist;
+        do {
+            x = Math.random() * this.width;
+            y = Math.random() * this.height;
+            dist = MathUtils.distance({x, y}, this.player);
+        } while (dist < 300); // Minimum safe distance
+        
+        this.hunters.push(new Hunter(x, y));
+    }
+
+    deployEcho() {
+        if (this.player.history.length > 30) {
+            this.echos.push(new Echo(this.player.history));
+            this.echosUsed++;
+            this.audio.sfxEcho();
+            this.spawnParticles(this.player.x, this.player.y, '#088', 10);
+            
+            // Visual feedback on UI button
+            const btn = document.getElementById('echo-btn');
+            btn.style.transform = 'scale(0.9)';
+            setTimeout(() => btn.style.transform = 'scale(1)', 100);
+        }
+    }
+
+    spawnParticles(x, y, color, count) {
+        for (let i = 0; i < count; i++) {
+            this.particles.push(new Particle(x, y, color, Math.random() * 2 + 1, Math.random() * 500 + 300));
+        }
+    }
+
+    triggerScreenShake(duration) {
+        this.shakeTimer = duration;
+    }
+
+    updateHUD() {
+        const percent = Math.min(100, (this.score / this.targetScore) * 100);
+        this.progressBar.style.width = `${percent}%`;
+        
+        this.phaseText.textContent = this.phase;
+        if (this.phase === 'GATHER') {
+            this.phaseText.className = 'phase-gather';
+        } else {
+            this.phaseText.className = 'phase-hunt';
+        }
+
+        // Lives
+        for (let i = 1; i <= 3; i++) {
+            const el = document.getElementById(`life-${i}`);
+            if (i <= this.lives) el.classList.remove('lost');
+            else el.classList.add('lost');
+        }
+    }
+
+    handleCollisions() {
+        // Cores Collection
+        for (let i = this.cores.length - 1; i >= 0; i--) {
+            let core = this.cores[i];
+            let collected = false;
+
+            // Logic depends on phase
+            if (this.phase === 'GATHER') {
+                // Must push to Nexus
+                if (MathUtils.distance(core, this.nexus) < this.nexus.radius + core.radius) {
+                    collected = true;
+                }
+            } else {
+                // HUNT phase: Player must touch directly
+                if (MathUtils.distance(core, this.player) < this.player.radius + core.radius) {
+                    collected = true;
+                }
+            }
+
+            if (collected) {
+                this.cores.splice(i, 1);
+                this.score++;
+                this.audio.sfxCollect();
+                this.spawnParticles(core.x, core.y, '#ff0', 15);
+                this.updateHUD();
+                
+                // Keep spawning to maintain population
+                setTimeout(() => this.spawnCore(), 500);
+
+                if (this.score >= this.targetScore) {
+                    this.triggerVictory();
+                }
+            }
+        }
+
+        // Hunter collisions
+        if (this.player.invulnerable <= 0) {
+            for (let hunter of this.hunters) {
+                if (hunter.spawnTimer <= 0 && MathUtils.distance(this.player, hunter) < this.player.radius + hunter.radius - 2) {
+                    this.takeDamage();
+                    break;
+                }
+            }
+        }
+    }
+
+    takeDamage() {
+        this.lives--;
+        this.player.invulnerable = 2000; // 2 seconds iframes
+        this.audio.sfxDamage();
+        this.triggerScreenShake(300);
+        this.spawnParticles(this.player.x, this.player.y, '#f05', 30);
+        this.updateHUD();
+
+        if (this.lives <= 0) {
+            this.triggerGameOver();
+        }
+    }
+
+    triggerGameOver() {
+        this.state = 'GAMEOVER';
+        this.hud.style.opacity = '0';
+        setTimeout(() => {
+            this.gameOverScreen.classList.remove('hidden');
+            document.getElementById('final-score').textContent = `${Math.floor((this.score / this.targetScore) * 100)}%`;
+            document.getElementById('final-time').textContent = `${Math.floor((Date.now() - this.startTime) / 1000)}s`;
+        }, 500);
+    }
+
+    triggerVictory() {
+        this.state = 'VICTORY';
+        this.audio.sfxWin();
+        this.hud.style.opacity = '0';
+        
+        // Explosion of particles at nexus
+        this.spawnParticles(this.nexus.x, this.nexus.y, '#0ff', 100);
+        this.spawnParticles(this.nexus.x, this.nexus.y, '#0f0', 100);
+
+        setTimeout(() => {
+            this.victoryScreen.classList.remove('hidden');
+            document.getElementById('win-time').textContent = `${Math.floor((Date.now() - this.startTime) / 1000)}s`;
+            document.getElementById('win-echos').textContent = this.echosUsed;
+        }, 1500);
+    }
+
+    update(dt) {
+        if (this.state !== 'PLAYING') return;
+
+        // Difficulty scaling
+        this.difficultyTimer += dt;
+        if (this.difficultyTimer > 10000) { // Every 10 seconds
+            this.difficultyTimer = 0;
+            if (this.hunters.length < 5 + (this.score / 5)) {
+                this.spawnHunter();
+            }
+            if (this.cores.length < 15) {
+                this.spawnCore();
+            }
+        }
+
+        // Phase shifting
+        this.phaseTimer -= dt;
+        if (this.phaseTimer <= 0) {
+            this.phaseTimer = this.phaseDuration;
+            this.phase = this.phase === 'GATHER' ? 'HUNT' : 'GATHER';
+            this.updateHUD();
+            if(this.phase === 'GATHER') this.audio.sfxPhaseGather();
+            else this.audio.sfxPhaseHunt();
+            
+            // Visual burst on phase shift
+            this.triggerScreenShake(150);
+        }
+
+        this.player.update(dt, this.pointer);
+        this.nexus.update(dt);
+
+        // Update Echos
+        for (let i = this.echos.length - 1; i >= 0; i--) {
+            this.echos[i].update(dt);
+            if (this.echos[i].life <= 0) {
+                this.echos.splice(i, 1);
+            }
+        }
+
+        // Update Cores
+        for (let core of this.cores) {
+            core.update(dt, this.player, this.echos, this.nexus, this.phase, this.width, this.height);
+        }
+
+        // Update Hunters
+        for (let hunter of this.hunters) {
+            hunter.update(dt, this.player, this.echos);
+        }
+
+        // Update Particles
+        for (let i = this.particles.length - 1; i >= 0; i--) {
+            this.particles[i].update(dt);
+            if (this.particles[i].life <= 0) {
+                this.particles.splice(i, 1);
+            }
+        }
+
+        this.handleCollisions();
+        
+        if (this.shakeTimer > 0) this.shakeTimer -= dt;
+    }
+
+    draw() {
+        // Clear background with slight trail effect
+        this.ctx.globalCompositeOperation = 'source-over';
+        this.ctx.fillStyle = 'rgba(3, 5, 8, 0.3)';
+        this.ctx.fillRect(0, 0, this.width, this.height);
+
+        // Draw grid background based on phase
+        this.ctx.strokeStyle = this.phase === 'GATHER' ? 'rgba(0, 255, 255, 0.03)' : 'rgba(255, 0, 255, 0.03)';
+        this.ctx.lineWidth = 1;
+        const gridSize = 50;
+        const offset = (Date.now() / 50) % gridSize;
+        
+        this.ctx.beginPath();
+        for(let x = offset; x < this.width; x += gridSize) {
+            this.ctx.moveTo(x, 0); this.ctx.lineTo(x, this.height);
+        }
+        for(let y = offset; y < this.height; y += gridSize) {
+            this.ctx.moveTo(0, y); this.ctx.lineTo(this.width, y);
+        }
+        this.ctx.stroke();
+
+        this.ctx.save();
+
+        // Screen Shake
+        if (this.shakeTimer > 0) {
+            const dx = (Math.random() - 0.5) * 10;
+            const dy = (Math.random() - 0.5) * 10;
+            this.ctx.translate(dx, dy);
+        }
+
+        // Add glow blend mode
+        this.ctx.globalCompositeOperation = 'screen';
+
+        if (this.state === 'PLAYING' || this.state === 'VICTORY' || this.state === 'GAMEOVER') {
+            this.nexus.draw(this.ctx, this.phase);
+            
+            for (let echo of this.echos) echo.draw(this.ctx);
+            for (let core of this.cores) core.draw(this.ctx);
+            for (let hunter of this.hunters) hunter.draw(this.ctx);
+            for (let p of this.particles) p.draw(this.ctx);
+            
+            if (this.state !== 'VICTORY' || this.lives > 0) {
+                this.player.draw(this.ctx);
+            }
+        }
+
+        this.ctx.restore();
+    }
+
+    loop(timestamp) {
+        const dt = timestamp - this.lastTime;
+        this.lastTime = timestamp;
+
+        // Cap dt to prevent massive jumps if tab is inactive
+        if (dt < 100) {
+            this.update(dt);
+        }
+        this.draw();
+
+        requestAnimationFrame((t) => this.loop(t));
+    }
+}
+
+// Initialize on load
+window.onload = () => {
+    const game = new GameManager();
+};
+</script>
+</body>
+</html>
